@@ -115,10 +115,10 @@ const App = ({wallet}:{wallet:ethers.Wallet|ethers.HDNodeWallet}) => {
         }
 	  ]);
 	let password = answers.password as string;
-	if (!answers.new) {
+	if (answers.new) {
 		wallet = ethers.Wallet.createRandom()
 		const encryptedJson = await wallet.encrypt(password);
- 		fs.writeFileSync(path.join(answers.foulder,`${wallet.address}_keystore.json`), encryptedJson, 'utf-8');
+ 		fs.writeFileSync(path.join(answers.foulder,`${wallet.address.substring(0, 9)}_keystore.json`), encryptedJson, 'utf-8');
 	}else{
 		let path = answers.file as string;
 		console.log(path,password);	
