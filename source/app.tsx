@@ -5,6 +5,7 @@ import inquirer from 'inquirer';
 import inquirerFileTreeSelection from 'inquirer-file-tree-selection-prompt';
 import { ethers } from 'ethers';
 import * as fs from 'fs';
+import * as path from 'path';
 
 type PageType = "home" | "transfer" ;
 
@@ -67,7 +68,7 @@ const Transfer: React.FC<{rP:routingProp}> = ({rP}) => {
 	);
 };
 
-const App = ({wallet}:{wallet:ethers.Wallet}) => {
+const App = ({wallet}:{wallet:ethers.Wallet|ethers.HDNodeWallet}) => {
 	console.log(wallet.address);
 	const [page, setPage] = useState<PageType>("home");
 
@@ -80,15 +81,31 @@ const App = ({wallet}:{wallet:ethers.Wallet}) => {
 	);
 }
 
-(async () => {   // pass a flag if you need a new acc
+(async () => {   
 	inquirer.registerPrompt('file-tree-selection', inquirerFileTreeSelection);
-	const answer = await inquirer.prompt([
+	let wallet:ethers.Wallet | ethers.HDNodeWallet;
+	const answers = await inquirer.prompt([
+		{
+			type: 'confirm',
+			name: 'new',
+			message: 'Create new wallet?',
+			default: false
+		},
+		{
+			type: 'file-tree-selection',
+			name: 'foulder',
+			message: 'Select a foulder',
+			root: '/',  
+			onlyShowDir: true,
+			when: (answers:any) => answers.new
+		},
 		{
 			type: 'file-tree-selection',
 			name: 'file',
 			message: 'Select a file',
 			root: '/',  
 			onlyShowDir: false,
+			when: (answers:any) => !answers.new
 		},
 		{
             type: 'password',
@@ -97,15 +114,21 @@ const App = ({wallet}:{wallet:ethers.Wallet}) => {
             mask: '🧙',
         }
 	  ]);
-	let path = answer.file as string;
-	let password = answer.password as string;
+	let password = answers.password as string;
+	if (!answers.new) {
+		wallet = ethers.Wallet.createRandom()
+		const encryptedJson = await wallet.encrypt(password);
+ 		fs.writeFileSync(path.join(answers.foulder,`${wallet.address}_keystore.json`), encryptedJson, 'utf-8');
+	}else{
+		let path = answers.file as string;
+		console.log(path,password);	
+		const encryptedJson = fs.readFileSync(path, 'utf-8');
+		wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
+	}
+
 	console.clear()
-	console.log(path,password);
-	
-	const encryptedJson = fs.readFileSync(path, 'utf-8');
-  	let wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
 	render(
-		<App wallet={wallet as ethers.Wallet}/>
+		<App wallet={wallet}/>
 		,{exitOnCtrlC:true}
 	);
 })();
