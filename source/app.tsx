@@ -1,11 +1,12 @@
 import React ,{useState} from 'react';
-import { Form } from 'ink-form';
-import {render, Box, Text} from 'ink';
+import {render, Box, Text,useFocus, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import inquirer from 'inquirer';
 import inquirerFileTreeSelection from 'inquirer-file-tree-selection-prompt';
+import { ethers } from 'ethers';
+import * as fs from 'fs';
 
-type PageType = "home" | "file" | "password";
+type PageType = "home" | "transfer" ;
 
 /*
 interface fileQueryProps {
@@ -21,19 +22,6 @@ interface stringStateProp {
 interface routingProp{
 	setPage: React.Dispatch<React.SetStateAction<PageType>>
 }
-
-const FileQuery: React.FC<{path:string, rP:routingProp, sSP:stringStateProp}> = ({path,rP,sSP}) => {    
-	const [query, setQuery] = useState(path);
-	
-	return (
-	  <Box>
-		<Box marginRight={1}>
-		  <Text>Enter JSON file path: </Text>
-		  <TextInput value={query} onChange={setQuery} onSubmit={() => {sSP.setString(query),rP.setPage("password")}} />			
-		</Box>
-	  </Box>
-	);
-};
 
 const PasswordQuery: React.FC<{path:string, rP:routingProp}> = ({path,rP}) => {
 	const [password, setPassword] = useState('');
@@ -54,27 +42,45 @@ const PasswordQuery: React.FC<{path:string, rP:routingProp}> = ({path,rP}) => {
 	);
 }
 
-const Home = () => {
+const Home: React.FC<{rP:routingProp}> = ({rP}) => {
+	const { isFocused } = useFocus();
+
+    useInput((input, key) => {
+        if (isFocused && key.return) {
+            console.log('Enter key pressed Home');
+        }
+    });
 	return(
-		<Text>Home</Text>
+		<Box marginRight={1}>
+			<Text>Home</Text>
+		</Box>
 	);
 };
 
-const App = ({path}:{path: string }) => {
-	const [page, setPage] = useState<PageType>("file");
-	const [confirmedPath, setPath]  = useState(path);
+const Transfer: React.FC<{rP:routingProp}> = ({rP}) => {
+	
+
+	return(
+		<Box marginRight={1}>
+			<Text>Transfer</Text>
+		</Box>
+	);
+};
+
+const App = ({wallet}:{wallet:ethers.Wallet}) => {
+	console.log(wallet.address);
+	const [page, setPage] = useState<PageType>("home");
 
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home />,
-        file: <FileQuery path={path} rP={{setPage}} sSP={{setString:setPath}} />,
-        password: <PasswordQuery path={confirmedPath} rP={{setPage}} />,
+		home: <Home rP={{setPage}}/>,
+		transfer: <Transfer rP={{setPage}}/>,
     };
 	return(
 		<Box flexDirection="column">{pages[page]}</Box>
 	);
 }
 
-(async () => {
+(async () => {   // pass a flag if you need a new acc
 	inquirer.registerPrompt('file-tree-selection', inquirerFileTreeSelection);
 	const answer = await inquirer.prompt([
 		{
@@ -82,31 +88,25 @@ const App = ({path}:{path: string }) => {
 			name: 'file',
 			message: 'Select a file',
 			root: '/',  
-			onlyShowDir: false,   
-		}
+			onlyShowDir: false,
+		},
+		{
+            type: 'password',
+            name: 'password',
+            message: 'Enter your password:',
+            mask: '🧙',
+        }
 	  ]);
 	let path = answer.file as string;
+	let password = answer.password as string;
+	console.clear()
+	console.log(path,password);
+	
+	const encryptedJson = fs.readFileSync(path, 'utf-8');
+  	let wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
 	render(
-		<App path={path}/>
-		,{exitOnCtrlC:true});
+		<App wallet={wallet as ethers.Wallet}/>
+		,{exitOnCtrlC:true}
+	);
 })();
   
-
-
-/*
-	<Form
-	onSubmit={value => console.log(`Submitted: `, value)}
-	form={{
-		title: "Form title",
-		sections: [
-		{
-			title: "Text fields",
-			fields: [
-			{ type: 'string', name: 'field1', label: 'Input with initial value', initialValue: 'Initial value' },
-			{ type: 'string', name: 'field2', label: 'Masked input', mask: '*' },
-			]
-		},
-		]
-	}}
-	/>
-	*/
