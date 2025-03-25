@@ -8,8 +8,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { info } from 'console';
 
+type coin = {symbol:string, address:string};
+
 type PageType = "home" | "transfer" ;
-const coins = [{symbol:"USDC", address:"0x"}];
+
+const coinsMap: Map<number, [coin]> = new Map([
+	[1,[{symbol:"USDC", address:"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}]],
+	[137,[{symbol:"USDC", address:"0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"}]],
+	[56,[{symbol:"USDC", address:"0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d​"}]]
+]);
+
+enum symbolToNetwokID {
+	ETHER=1,
+	MATIC=137,
+	BSC=56
+  }
 
 interface infoTxProp{
 	balance: number,
@@ -24,53 +37,62 @@ interface pageState{
 	infoTx?: infoTxProp
 }
 
-const Coin: React.FC<{symbol:string, address?:string, rP:routingProp}> = ({symbol,address,rP}) => {
+const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.Wallet|ethers.HDNodeWallet}> = ({symbol,address,rP,w}) => {
 	const { isFocused } = useFocus();
 	const [balance, setBalance] = useState(0.0);
+	const [color, setColor] = useState("");
 
-	useEffect(() => {
-		//put inside timer
+	useEffect(() => {/*
+		const timer = setTimeout(() => {
 			if (address){
 				// check erc-20 token balance
 			}
 			// check native token balance
-
-		//return timer to clear
+		  }, 30000);
+	  
+		  return () => clearTimeout(timer); 
+		  */
 	},[]);
 
+	useEffect(() => {
+		if (isFocused){
+			setColor("green");
+		}else{
+			setColor("black");
+		}
+	},[isFocused])
+	
     useInput((input, key) => {
         if (isFocused && key.return) {
-            console.log('Enter key pressed Home');
+            console.log(`Enter key pressed ${symbol}`);
 			rP.setPage({page:"transfer",infoTx:{balance:balance,contract:address}});
         }
     });
 
 	return (
-		<Box margin={1}>
+		<Box margin={1} borderStyle={"round"} borderColor={`${color}`} justifyContent="space-around" >
 			<Text>{symbol} {balance}</Text>
 		</Box>
 	);
 }
 
-const Home: React.FC<{rP:routingProp}> = ({rP}) => {
-	 
-
+const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number}> = ({rP,w,ID}) => {
+	
 	return(
-		<Box marginTop={1} borderColor={"magenta"}>
+		<Box marginTop={1} borderStyle={"round"} borderColor={"magenta"} flexDirection="column">
 			<Box>
-				<Text>Home</Text>
+				<Coin symbol={symbolToNetwokID[ID]as string} rP={rP} w={w}/>
 			</Box>
-			<Box margin={1} borderColor={"black"}>
-				{coins.map((item, index) => (
-					<Coin key={index} symbol={item.symbol} address={item.address} rP={rP}/>
+			<Box margin={1} borderStyle={"round"} borderColor={"black"}>
+				{coinsMap.get(ID)?.map((item, index) => (
+					<Coin key={index} symbol={item.symbol} address={item.address} rP={rP} w={w}/>
 				))}
 			</Box>
 		</Box>
 	);
 };
 
-const Transfer: React.FC<{rP:routingProp}> = ({rP}) => {
-	
+const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet}> = ({rP,w}) => {
 
 	return(
 		<Box marginTop={1}>
@@ -79,23 +101,22 @@ const Transfer: React.FC<{rP:routingProp}> = ({rP}) => {
 	);
 };
 
-const App = ({wallet}:{wallet:ethers.Wallet|ethers.HDNodeWallet}) => {
-	console.log(wallet.address);
+const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,networkID:number}) => {
 	const [page, setPage] = useState<pageState>({page:"home"});
 	
-	
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home rP={{setPage}}/>,
-		transfer: <Transfer rP={{setPage}}/>,
+		home: <Home rP={{setPage}} w={wallet} ID={networkID}/>,
+		transfer: <Transfer rP={{setPage}} w={wallet}/>,
     };
 	return(
-		<Box flexDirection="row">{pages[page.page]}</Box>
+		<Box height="100%">{pages[page.page]}</Box>
 	);
 }
 
 (async () => {   
 	inquirer.registerPrompt('file-tree-selection', inquirerFileTreeSelection);
 	let wallet:ethers.Wallet | ethers.HDNodeWallet;
+	
 	const answers = await inquirer.prompt([
 		{
 			type: 'confirm',
@@ -137,11 +158,15 @@ const App = ({wallet}:{wallet:ethers.Wallet|ethers.HDNodeWallet}) => {
 		const encryptedJson = fs.readFileSync(path, 'utf-8');
 		wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
 	}
-
+	
 	console.clear()
+	
+	const provider = new ethers.JsonRpcProvider(""); //setup env
+	const network = await provider.getNetwork()
 	render(
-		<App wallet={wallet}/>
+		<App wallet={wallet.connect(provider)} networkID={Number(network.chainId)}/>
 		,{exitOnCtrlC:true}
 	);
+	//console.clear() //on prod
 })();
   
