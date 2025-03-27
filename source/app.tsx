@@ -44,7 +44,7 @@ interface infoTxProp{
 	contract?: string
 }
 interface routingProp{
-	setPage: React.Dispatch<React.SetStateAction<pageState>>
+	setState: React.Dispatch<React.SetStateAction<pageState>>
 }
 
 interface pageState{
@@ -58,7 +58,6 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 	const [color, setColor] = useState("");
 	
 	useEffect(() => {
-		let timer: NodeJS.Timeout;
 		let balanceCheck: () => void;
 			if (address){
 				const contract = new ethers.Contract(address, ERC20_ABI, w) as any // check erc-20 token balance
@@ -75,24 +74,18 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 				}
 			}
 		balanceCheck();
-		const interval = setInterval(balanceCheck, 30000);
+		const interval = setInterval(balanceCheck, 10000);
 		return () => clearInterval(interval); 
 	},[]);
 
 	useEffect(() => {
-		if (isFocused){
-			setColor("green");
-		}else{
-			setColor("black");	
-		}
+		isFocused? setColor("green"):setColor("black")
 		console.clear() 
-		//console.log(balance);
 	},[isFocused])
 	
     useInput((input, key) => {
         if (isFocused && key.return) {
-            console.log(`Enter key pressed ${symbol}`);
-			rP.setPage({page:"transfer",infoTx:{balance:balance,contract:address}});
+			rP.setState({page:"transfer",infoTx:{balance:balance,contract:address}});
         }
     });
 
@@ -107,7 +100,7 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number}> = ({rP,w,ID}) => {
 	
 	return(
-		<Box  flexDirection={"column"} justifyContent={"center"}  width={"100%"} >
+		<Box flexDirection={"column"} justifyContent={"center"}  width={"100%"} >
 			<Text>Network: {nameToNetwokID[ID]}</Text> 
 			<Text>ADDRESS: {w.address}</Text> 
 			<Box marginTop={1} padding={1} borderStyle={"round"} borderColor={"magenta"} flexDirection={"column"} width={"33%"} >
@@ -125,11 +118,97 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 	);
 };
 
-const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet}> = ({rP,w}) => {
+const Input = ({text,value,setValue}:{text:string,value:string,setValue:React.Dispatch<React.SetStateAction<string>>}) => {
+	const [color, setColor] = useState("");
+	const { isFocused } = useFocus();
+
+	useEffect(() => {
+		isFocused? setColor("green"):setColor("black")
+		console.clear() 
+	},[isFocused])
+	return(
+		<Box borderStyle={"round"} borderColor={`${color}`} marginTop={1} >
+			<Text>{text}: </Text>
+			<TextInput value={value} onChange={setValue} focus={isFocused} showCursor={true}></TextInput>
+		</Box>
+	);
+}
+
+const Send = ({amount,address,setTx,txInfo,w}:
+	{amount:string,address:string,setTx:React.Dispatch<React.SetStateAction<any>>,txInfo:infoTxProp,w:ethers.Wallet|ethers.HDNodeWallet}) => {
+	const [color, setColor] = useState("");
+	const { isFocused } = useFocus();
+	const [blocked, setBlock] = useState(true)
+
+	useEffect(() => {
+			if ((amount && address) && Number(amount) < Number(txInfo.balance)){setBlock(false);setColor("green");return}
+			isFocused?setColor("red"):setColor("black")
+		},[isFocused])
+	
+	useInput((input, key) => {
+		if (isFocused && key.return) {
+			if (blocked){return}
+			if (txInfo.contract){
+				const contract = new ethers.Contract(address, ERC20_ABI, w) as any 
+				contract.transfer(address, ethers.parseUnits(amount, 8)) // check decimals
+					.then((tx:any ) => {
+					console.log("Transaction sent! Hash:", tx.hash);
+					setTx(tx)})
+				return
+			}
+			w.sendTransaction({
+				to:address,
+				value: ethers.parseEther(amount), // Convert ETH to Wei
+			}).then((tx:any ) => {
+				console.log("Transaction sent! Hash:", tx.hash);
+				setTx(tx)
+			})
+		}
+	});
 
 	return(
-		<Box marginTop={1}>
-			<Text>Transfer</Text>
+		<Box marginTop={1} borderStyle={'round'} borderColor={color}>
+			<Text>SEND</Text>
+		</Box>
+	);
+	
+};
+
+const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txInfo:infoTxProp|undefined}> = ({rP,w,txInfo}) => {
+	if (!txInfo){
+		return <text>something weird happened.</text>
+	}
+	const [address, setAddress] = useState("");
+	const [amount, setAmount] = useState("");
+	const [tx, setTx] = useState<any|undefined>();
+
+	useEffect(()=>{
+		if (!tx){return}
+		tx.wait()
+			.then((receipt:any) => { 
+			console.log("Transaction confirmed in block:", receipt.blockNumber);
+			console.log("Gas Used:", receipt.gasUsed.toString());
+			console.log("Transaction Success:", receipt.status === 1?"success":"failed");
+			})
+			.catch((error:any) => {
+			console.error("Error during transaction:", error);
+			});
+	},[tx]) 
+
+	useInput((input, key) => {
+		if (input == "r") {
+			//return to home
+		}});
+
+	return(
+		//<Text>gas now: </Text> 
+		<Box flexDirection='column'>
+			<Input text={"Address"} value={address} setValue={setAddress}/>
+			<Input text={"Amount"} value={amount} setValue={setAmount}/>
+			<Box marginTop={1}>
+				
+			</Box>
+			<Send w={w} amount={amount} address={address} setTx={setTx} txInfo={txInfo}></Send>
 		</Box>
 	);
 };
@@ -138,18 +217,21 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 	const [page, setPage] = useState<pageState>({page:"home"});
 	
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home rP={{setPage}} w={wallet} ID={networkID}/>,
-		transfer: <Transfer rP={{setPage}} w={wallet}/>,
+		home: <Home rP={{setState: setPage}} w={wallet} ID={networkID}/>,
+		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx}/>,
     };
 	return(
-		<Box height={"100%"} width={"100%"} justifyContent={"center"} >{pages[page.page]}</Box>
+		<Box height={"100%"} width={"100%"} justifyContent={"center"} flexDirection={"column"} >
+			{pages[page.page]}
+			<Text>TAB ➤ MOVE |🧙| R ➤ return |🧙| Q ➤ quit</Text>
+		</Box>
 	);
 }
 
 (async () => {   
 	inquirer.registerPrompt('file-tree-selection', inquirerFileTreeSelection);
 	let wallet:ethers.Wallet | ethers.HDNodeWallet;
-	
+	/*
 	const answers = await inquirer.prompt([
 		{
 			type: 'confirm',
@@ -190,11 +272,9 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 		const encryptedJson = fs.readFileSync(path, 'utf-8');
 		wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
 	}
-	
 	console.clear()
-	
-	//wallet = ethers.Wallet.createRandom()
-
+	*/
+	wallet = ethers.Wallet.createRandom()
 	//const provider = new ethers.JsonRpcProvider("https://eth.llamarpc.com"); //setup env
 	const provider = new ethers.JsonRpcProvider("https://sepolia.drpc.org");
 	const network = await provider.getNetwork()
