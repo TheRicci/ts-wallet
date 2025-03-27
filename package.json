@@ -16,6 +16,7 @@
 		"dist"
 	],
 	"dependencies": {
+		"dotenv": "^16.4.7",
 		"electron": "^35.0.3",
 		"ethers": "^6.13.5",
 		"file-dialog": "^0.0.8",

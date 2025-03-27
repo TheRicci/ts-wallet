@@ -6,6 +6,7 @@ import inquirerFileTreeSelection from 'inquirer-file-tree-selection-prompt';
 import { ethers } from 'ethers';
 import * as fs from 'fs';
 import * as path from 'path';
+import dotenv from "dotenv";
 
 type PageType = "home" | "transfer" ;
 
@@ -18,6 +19,11 @@ const coinsMap: Map<number, [coin]> = new Map([
 	[11155111,[{symbol:"USDC", address:"0x779877A7B0D9E8603169DdbD7836e478b4624789"}]] //testnet
 	
 ]);
+
+dotenv.config(); 
+
+const ETHERSCAN_API_KEY = process.env["ETHERSCAN_API_KEY"] ?? "";
+const BASE_URL = "https://api-sepolia.etherscan.io/api";
 
 const ERC20_ABI = [
 	"function balanceOf(address owner) view returns (uint256)",
@@ -98,21 +104,69 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 }
 
 const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number}> = ({rP,w,ID}) => {
-	
-	return(
-		<Box flexDirection={"column"} justifyContent={"center"}  width={"100%"} >
-			<Text>Network: {nameToNetwokID[ID]}</Text> 
-			<Text>ADDRESS: {w.address}</Text> 
-			<Box marginTop={1} padding={1} borderStyle={"round"} borderColor={"magenta"} flexDirection={"column"} width={"33%"} >
-				<Box marginLeft={1} justifyContent={"space-between"}>
-					<Text color={"magentaBright"}>Symbol </Text>
-					<Text color={"magentaBright"}>Balance</Text>
-				</Box>
-				<Coin symbol={symbolToNetwokID[ID]as string} rP={rP} w={w}/>
+	const [logs, setLogs] = useState<any[]>([]);
+
+	const checkLogs = () => {
+		const erc20TxUrl = `${BASE_URL}?module=account&action=tokentx&address=${w.address}&startblock=0&endblock=99999999&sort=asc&apikey=${ETHERSCAN_API_KEY}`;
+		const ethTxUrl = `${BASE_URL}?module=account&action=txlist&address=${w.address}&startblock=0&endblock=99999999&sort=asc&apikey=${ETHERSCAN_API_KEY}`;
+		// Fetch both transactions
+		Promise.all([
+			fetch(ethTxUrl).then(response => response.json()),
+			fetch(erc20TxUrl).then(response => response.json())
+			]).then(([ethData, erc20Data]) => {
+			const ethTransactions = ethData.result || [];
+			const erc20Transactions = erc20Data.result || [];
+		
+			// Merge transactions into a single array
+			const allTransactions = [...ethTransactions, ...erc20Transactions];
+		
+			// Sort by timestamp (ascending)
+			allTransactions.sort((a, b) => Number(a.timeStamp) - Number(b.timeStamp));
 			
-				{coinsMap.get(ID)?.map((item, index) => (
-					<Coin key={index} symbol={item.symbol} address={item.address} rP={rP} w={w}/>
-				))}
+			setLogs(allTransactions)
+			})
+			.catch(error => console.error(`Error fetching transactions for ${ID}:`, error));
+		};
+
+	useEffect(()=>{
+		checkLogs()
+		setInterval(checkLogs,20000)
+	},[])
+
+	useInput((input, key) => {
+		if (input =="q") {
+			console.clear()
+			process.exit()
+		}
+	});
+
+
+	const transactions = () =>{
+		return logs.map((item,index) => {
+			if (item.from == w.address ){
+				return <Text key={index} color={"red"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: symbolToNetwokID[ID]} 🢥 {item.to.substring(0,9)}</Text>
+			}
+			return <Text key ={index} color={"green"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: symbolToNetwokID[ID]} 🢦 {item.from.substring(0,9)}</Text>
+		})
+	}
+
+	return(
+		<Box>
+			<Box flexDirection={"column"} justifyContent={"center"}  width={"50%"} >
+				<Box padding={1} borderStyle={"round"} borderColor={"magenta"} flexDirection={"column"} width={"100%"} >
+					<Box marginLeft={1} justifyContent={"space-between"}>
+						<Text color={"magentaBright"}>Symbol </Text>
+						<Text color={"magentaBright"}>Balance</Text>
+					</Box>
+					<Coin symbol={symbolToNetwokID[ID]as string} rP={rP} w={w}/>
+				
+					{coinsMap.get(ID)?.map((item, index) => (
+						<Coin key={index} symbol={item.symbol} address={item.address} rP={rP} w={w}/>
+					))}
+				</Box>
+			</Box>
+			<Box flexDirection={"column"} alignItems='center' width={"40%"} marginRight={2} marginLeft={2} >
+					{transactions()}
 			</Box>
 		</Box>
 	);
@@ -197,12 +251,18 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 
 	useInput((input, key) => {
 		if (input == "r") {
-			//return to home
-		}});
+			rP.setState({page:"home"})
+			return
+		}
+		if (input =="q") {
+			console.clear()
+			process.exit()
+		}
+	});
 
 	return(
 		//<Text>gas now: </Text> 
-		<Box flexDirection='column'>
+		<Box flexDirection='column' width={'50%'} alignItems='center'>
 			<Input text={"Address"} value={address} setValue={setAddress}/>
 			<Input text={"Amount"} value={amount} setValue={setAmount}/>
 			<Box marginTop={1}>
@@ -221,17 +281,26 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx}/>,
     };
 	return(
-		<Box height={"100%"} width={"100%"} justifyContent={"center"} flexDirection={"column"} >
-			{pages[page.page]}
-			<Text>TAB ➤ MOVE |🧙| R ➤ return |🧙| Q ➤ quit</Text>
+		<Box flexDirection={"column"} width={"100%"} height={"100%"}>
+			<Box flexDirection={"column"}>
+					<Text>Network: {nameToNetwokID[networkID]}</Text> 
+					<Text>ADDRESS: {wallet.address}</Text> 
+			</Box>
+			<Box  flexDirection={"column"}>
+				{pages[page.page]}
+			</Box>
+			<Box justifyContent='center' width={"100%"} marginTop={1} >
+				<Text>TAB ➤ MOVE |🧙| R ➤ return |🧙| Q ➤ quit</Text>
+			</Box>
 		</Box>
 	);
+	
 }
 
 (async () => {   
 	inquirer.registerPrompt('file-tree-selection', inquirerFileTreeSelection);
 	let wallet:ethers.Wallet | ethers.HDNodeWallet;
-	/*
+	
 	const answers = await inquirer.prompt([
 		{
 			type: 'confirm',
@@ -273,8 +342,8 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 		wallet = await ethers.Wallet.fromEncryptedJson(encryptedJson, password); //check errors
 	}
 	console.clear()
-	*/
-	wallet = ethers.Wallet.createRandom()
+	
+	//wallet = ethers.Wallet.createRandom()
 	//const provider = new ethers.JsonRpcProvider("https://eth.llamarpc.com"); //setup env
 	const provider = new ethers.JsonRpcProvider("https://sepolia.drpc.org");
 	const network = await provider.getNetwork()
