@@ -23,6 +23,7 @@
 		"ink": "^5.2.0",
 		"ink-form": "^2.0.1",
 		"ink-router": "^0.6.0",
+		"ink-scrollbar": "^1.0.0",
 		"ink-text-input": "^6.0.0",
 		"inquirer": "^9.3.7",
 		"inquirer-file-selector": "^0.6.2",

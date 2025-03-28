@@ -7,47 +7,32 @@ import { ethers } from 'ethers';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from "dotenv";
+import os from "os";
 
-type PageType = "home" | "transfer" ;
-
-type coin = {symbol:string, address:string};
-const coinsMap: Map<number, [coin]> = new Map([
-	[1,[{symbol:"USDC", address:"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}]],
-	[137,[{symbol:"USDC", address:"0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"}]],
-	[56,[{symbol:"USDC", address:"0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"}]],
-	//[42161,[{symbol:"USDC", address:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831​"}]],
-	[11155111,[{symbol:"USDC", address:"0x779877A7B0D9E8603169DdbD7836e478b4624789"}]] //testnet
-	
-]);
 
 dotenv.config(); 
 
-const ETHERSCAN_API_KEY = process.env["ETHERSCAN_API_KEY"] ?? "";
-const BASE_URL = "https://api-sepolia.etherscan.io/api";
+type PageType = "home" | "transfer" ;
+type coin = {symbol:string, address:string,decimal:number};
+
+type networkINFO = {name:string, symbol:string, apiAddress:string, apiKey:string,provider:string};
+const networkMAP: Map<number, networkINFO> = new Map([
+	[1,{name:"Ethereum",symbol:"ETHER",apiAddress:"https://api.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["ETHER_PROVIDER"]??"" }],
+	[137,{name:"Polygon",symbol:"MATIC",apiAddress:"https://api.polygonscan.com/api", apiKey:process.env["POLYGONSCAN_API_KEY"]??"",provider:process.env["POLYGON_PROVIDER"]??""}],
+	[56,{name:"BinanceChain",symbol:"BNB",apiAddress:"https://api.bscscan.com/api", apiKey:process.env["BSCSCAN_API_KEY"]??"",provider:process.env["ETHERSCAN_API_KEY"]??"" }],
+	[42161,{name:"Arbitrum",symbol:"ARB",apiAddress:"https://api.arbiscan.io/api", apiKey:process.env["ARBISCAN_API_KEY"]??"",provider:process.env["BSC_PROVIDER"]??"" }],
+	[11155111,{name:"Sepolia",symbol:"SepoliaETH",apiAddress:"https://api-sepolia.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["SEPOLIA_PROVIDER"]??"" }] //testnet
+]);
 
 const ERC20_ABI = [
 	"function balanceOf(address owner) view returns (uint256)",
 	"function transfer(address to, uint256 amount) public returns (bool)"
   ]as const;
 
-
-enum symbolToNetwokID {
-	ETHER=1,
-	MATIC=137,
-	BSC=56,
-	SepoliaETH=11155111
-}
-
-enum nameToNetwokID {
-	Ethereum=1,
-	Polygon=137,
-	BinanceChain=56,
-	Sepolia=11155111
-}
-
 interface infoTxProp{
 	balance: number,
-	contract?: string
+	contract?: string,
+	decimal?: number
 }
 interface routingProp{
 	setState: React.Dispatch<React.SetStateAction<pageState>>
@@ -58,7 +43,7 @@ interface pageState{
 	infoTx?: infoTxProp
 }
 
-const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.Wallet|ethers.HDNodeWallet}> = ({symbol,address,rP,w}) => {
+const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.Wallet|ethers.HDNodeWallet, decimal?:number}> = ({symbol,address,rP,w,decimal}) => {
 	const { isFocused } = useFocus();
 	const [balance, setBalance] = useState(0.0);
 	const [color, setColor] = useState("");
@@ -69,7 +54,7 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 				const contract = new ethers.Contract(address, ERC20_ABI, w) as any // check erc-20 token balance
 				balanceCheck = () =>{
 					contract.balanceOf(w.address).then((balance:any) => {
-						setBalance(Number(ethers.formatUnits(balance, 18)));
+						setBalance(Number(ethers.formatUnits(balance, Number(decimal))));
 					});
 				};
 			}else{
@@ -86,7 +71,7 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 
 	useEffect(() => {
 		isFocused? setColor("green"):setColor("black")
-		console.clear() 
+		//console.clear() 
 	},[isFocused])
 	
     useInput((input, key) => {
@@ -103,36 +88,7 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 	);
 }
 
-const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number}> = ({rP,w,ID}) => {
-	const [logs, setLogs] = useState<any[]>([]);
-
-	const checkLogs = () => {
-		const erc20TxUrl = `${BASE_URL}?module=account&action=tokentx&address=${w.address}&startblock=0&endblock=99999999&sort=asc&apikey=${ETHERSCAN_API_KEY}`;
-		const ethTxUrl = `${BASE_URL}?module=account&action=txlist&address=${w.address}&startblock=0&endblock=99999999&sort=asc&apikey=${ETHERSCAN_API_KEY}`;
-		// Fetch both transactions
-		Promise.all([
-			fetch(ethTxUrl).then(response => response.json()),
-			fetch(erc20TxUrl).then(response => response.json())
-			]).then(([ethData, erc20Data]) => {
-			const ethTransactions = ethData.result || [];
-			const erc20Transactions = erc20Data.result || [];
-		
-			// Merge transactions into a single array
-			const allTransactions = [...ethTransactions, ...erc20Transactions];
-		
-			// Sort by timestamp (ascending)
-			allTransactions.sort((a, b) => Number(a.timeStamp) - Number(b.timeStamp));
-			
-			setLogs(allTransactions)
-			})
-			.catch(error => console.error(`Error fetching transactions for ${ID}:`, error));
-		};
-
-	useEffect(()=>{
-		checkLogs()
-		setInterval(checkLogs,20000)
-	},[])
-
+const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number,logs:any[],coins:coin[]}> = ({rP,w,ID,logs,coins}) => {
 	useInput((input, key) => {
 		if (input =="q") {
 			console.clear()
@@ -140,13 +96,12 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 		}
 	});
 
-
 	const transactions = () =>{
 		return logs.map((item,index) => {
 			if (item.from == w.address ){
-				return <Text key={index} color={"red"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: symbolToNetwokID[ID]} 🢥 {item.to.substring(0,9)}</Text>
+				return <Text key={index} color={"red"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: String(networkMAP.get(ID)?.symbol)} 🢥 {item.to.substring(0,9)}</Text>
 			}
-			return <Text key ={index} color={"green"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: symbolToNetwokID[ID]} 🢦 {item.from.substring(0,9)}</Text>
+			return <Text key ={index} color={"green"}>{ethers.formatUnits(item.value, 18)} {item.tokenSymbol? item.tokenSymbol: String(networkMAP.get(ID)?.symbol)} 🢦 {item.from.substring(0,9)}</Text>
 		})
 	}
 
@@ -158,15 +113,16 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 						<Text color={"magentaBright"}>Symbol </Text>
 						<Text color={"magentaBright"}>Balance</Text>
 					</Box>
-					<Coin symbol={symbolToNetwokID[ID]as string} rP={rP} w={w}/>
+					<Coin symbol={String(networkMAP.get(ID)?.symbol)} rP={rP} w={w}/>
 				
-					{coinsMap.get(ID)?.map((item, index) => (
-						<Coin key={index} symbol={item.symbol} address={item.address} rP={rP} w={w}/>
+					{coins.map((item, index) => (
+						<Coin key={index} symbol={item.symbol} address={item.address} decimal={item.decimal} rP={rP} w={w}/>
 					))}
+
 				</Box>
 			</Box>
 			<Box flexDirection={"column"} alignItems='center' width={"40%"} marginRight={2} marginLeft={2} >
-					{transactions()}
+				{transactions()}
 			</Box>
 		</Box>
 	);
@@ -178,10 +134,10 @@ const Input = ({text,value,setValue}:{text:string,value:string,setValue:React.Di
 
 	useEffect(() => {
 		isFocused? setColor("green"):setColor("black")
-		console.clear() 
+		//console.clear() 
 	},[isFocused])
 	return(
-		<Box borderStyle={"round"} borderColor={`${color}`} marginTop={1} >
+		<Box borderStyle={"round"} borderColor={`${color}`} marginTop={1} width={'66%'} >
 			<Text>{text}: </Text>
 			<TextInput value={value} onChange={setValue} focus={isFocused} showCursor={true}></TextInput>
 		</Box>
@@ -196,7 +152,7 @@ const Send = ({amount,address,setTx,txInfo,w}:
 
 	useEffect(() => {
 			if ((amount && address) && Number(amount) < Number(txInfo.balance)){setBlock(false);setColor("green");return}
-			isFocused?setColor("red"):setColor("black")
+			isFocused?setColor("red"):setColor("blue")
 		},[isFocused])
 	
 	useInput((input, key) => {
@@ -213,7 +169,7 @@ const Send = ({amount,address,setTx,txInfo,w}:
 			w.sendTransaction({
 				to:address,
 				value: ethers.parseEther(amount), // Convert ETH to Wei
-			}).then((tx:any ) => {
+			}).then((tx:any) => {
 				console.log("Transaction sent! Hash:", tx.hash);
 				setTx(tx)
 			})
@@ -221,7 +177,7 @@ const Send = ({amount,address,setTx,txInfo,w}:
 	});
 
 	return(
-		<Box marginTop={1} borderStyle={'round'} borderColor={color}>
+		<Box marginTop={1} borderStyle={'round'} borderColor={color} width={'33%'} alignItems='center'>
 			<Text>SEND</Text>
 		</Box>
 	);
@@ -275,15 +231,54 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 
 const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,networkID:number}) => {
 	const [page, setPage] = useState<pageState>({page:"home"});
-	
+	const [logs, setLogs] = useState<any[]>([]);
+	const [coins, setCoins] = useState<coin[]>([]);
+
+	const checkLogs = () => {
+		const erc20TxUrl = `${networkMAP.get(networkID)?.apiAddress}?module=account&action=tokentx&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(networkID)?.apiKey}`;
+		const ethTxUrl = `${networkMAP.get(networkID)?.apiAddress}?module=account&action=txlist&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(networkID)?.apiKey}`;
+		
+		Promise.all([
+			fetch(ethTxUrl).then(response => response.json()),
+			fetch(erc20TxUrl).then(response => response.json())
+			]).then(([ethData, erc20Data]) => {
+			const ethTransactions = ethData.result || [];
+			const erc20Transactions = erc20Data.result || [];
+		
+			// Merge transactions into a single array
+			const allTransactions = [...ethTransactions, ...erc20Transactions];
+		
+			// Sort by timestamp (ascending)
+			allTransactions.sort((a, b) => Number(a.timeStamp) - Number(b.timeStamp));
+			
+			setLogs(allTransactions)
+			//console.log(allTransactions)
+			})
+			.catch(error => console.error(`Error fetching transactions for ${networkID}:`, error));
+	};
+
+	useEffect(()=>{
+		checkLogs()
+		setInterval(checkLogs,20000)
+	},[])
+
+	useEffect(()=>{
+		logs.map(item =>{
+			if (item.tokenSymbol && item.contractAddress && item.tokenDecimal){
+				console.log(item)
+				setCoins([...coins, {symbol:item.tokenSymbol,address:item.contractAddress,decimal:item.tokenDecimal}])
+			}
+		})
+	},[logs])
+
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home rP={{setState: setPage}} w={wallet} ID={networkID}/>,
+		home: <Home rP={{setState: setPage}} w={wallet} ID={networkID} logs={logs} coins={coins} />,
 		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx}/>,
     };
 	return(
 		<Box flexDirection={"column"} width={"100%"} height={"100%"}>
 			<Box flexDirection={"column"}>
-					<Text>Network: {nameToNetwokID[networkID]}</Text> 
+					<Text>Network: {String(networkMAP.get(networkID)?.name)}</Text> 
 					<Text>ADDRESS: {wallet.address}</Text> 
 			</Box>
 			<Box  flexDirection={"column"}>
@@ -312,7 +307,7 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 			type: 'file-tree-selection',
 			name: 'foulder',
 			message: 'Select a foulder',
-			root: '/',  
+			root: os.homedir(),  
 			onlyShowDir: true,
 			when: (answers:any) => answers.new
 		},
@@ -320,7 +315,7 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 			type: 'file-tree-selection',
 			name: 'file',
 			message: 'Select a file',
-			root: '/',  
+			root: os.homedir(),  
 			onlyShowDir: false,
 			when: (answers:any) => !answers.new
 		},
@@ -329,6 +324,18 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
             name: 'password',
             message: 'Enter your password:',
             mask: '🧙',
+        },
+		{
+            type: 'list',
+            name: 'network',
+            message: 'Select the network',
+            choices:[
+				{ name: 'Ethereum', value: 1 },
+				{ name: 'Polygon', value: 137 },
+				{ name: 'BinanceChain', value: 56 },
+				{ name: 'Arbitrum', value: 42161 },
+				{ name: 'Sepolia', value: 11155111 }
+			  ]
         }
 	  ]);
 	let password = answers.password as string;
@@ -344,13 +351,12 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 	console.clear()
 	
 	//wallet = ethers.Wallet.createRandom()
-	//const provider = new ethers.JsonRpcProvider("https://eth.llamarpc.com"); //setup env
-	const provider = new ethers.JsonRpcProvider("https://sepolia.drpc.org");
+	const provider = new ethers.JsonRpcProvider(networkMAP.get(Number(answers.network))?.provider);
 	const network = await provider.getNetwork()
 	render(
 		<App wallet={wallet.connect(provider)} networkID={Number(network.chainId)}/>
 		,{exitOnCtrlC:true}
 	);
-	//console.clear() //on prod
+	//console.clear() 
 })();
   
