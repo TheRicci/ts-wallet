@@ -1,1 +1,1 @@
-a terminal evm compatible crypto wallet, for usdc only (for now)
+a terminal evm compatible crypto wallet, auto coin detect
