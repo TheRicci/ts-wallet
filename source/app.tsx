@@ -3,25 +3,25 @@ import {render, Box, Text,useFocus, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import inquirer from 'inquirer';
 import inquirerFileTreeSelection from 'inquirer-file-tree-selection-prompt';
-import { ethers } from 'ethers';
+import { ethers, id } from 'ethers';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from "dotenv";
 import os from "os";
-
+import open from 'open';
 
 dotenv.config(); 
 
 type PageType = "home" | "transfer" ;
 type coin = {symbol:string, address:string,decimal:number};
 
-type networkINFO = {name:string, symbol:string, apiAddress:string, apiKey:string,provider:string};
+type networkINFO = {name:string, symbol:string, apiAddress:string, apiKey:string,provider:string,explorer:string};
 const networkMAP: Map<number, networkINFO> = new Map([
-	[1,{name:"Ethereum",symbol:"ETHER",apiAddress:"https://api.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["ETHER_PROVIDER"]??"" }],
-	[137,{name:"Polygon",symbol:"MATIC",apiAddress:"https://api.polygonscan.com/api", apiKey:process.env["POLYGONSCAN_API_KEY"]??"",provider:process.env["POLYGON_PROVIDER"]??""}],
-	[56,{name:"BinanceChain",symbol:"BNB",apiAddress:"https://api.bscscan.com/api", apiKey:process.env["BSCSCAN_API_KEY"]??"",provider:process.env["ETHERSCAN_API_KEY"]??"" }],
-	[42161,{name:"Arbitrum",symbol:"ARB",apiAddress:"https://api.arbiscan.io/api", apiKey:process.env["ARBISCAN_API_KEY"]??"",provider:process.env["BSC_PROVIDER"]??"" }],
-	[11155111,{name:"Sepolia",symbol:"SepoliaETH",apiAddress:"https://api-sepolia.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["SEPOLIA_PROVIDER"]??"" }] //testnet
+	[1,{name:"Ethereum",symbol:"ETHER",apiAddress:"https://api.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["ETHER_PROVIDER"]??"",explorer:"https://etherscan.io" }],
+	[137,{name:"Polygon",symbol:"MATIC",apiAddress:"https://api.polygonscan.com/api", apiKey:process.env["POLYGONSCAN_API_KEY"]??"",provider:process.env["POLYGON_PROVIDER"]??"",explorer:"https://polygonscan.com" }],
+	[56,{name:"BinanceChain",symbol:"BNB",apiAddress:"https://api.bscscan.com/api", apiKey:process.env["BSCSCAN_API_KEY"]??"",provider:process.env["ETHERSCAN_API_KEY"]??"",explorer:"https://bscscan.com"  }],
+	[42161,{name:"Arbitrum",symbol:"ARB",apiAddress:"https://api.arbiscan.io/api", apiKey:process.env["ARBISCAN_API_KEY"]??"",provider:process.env["BSC_PROVIDER"]??"" ,explorer:"https://www.arbiscan.io" }],
+	[11155111,{name:"Sepolia",symbol:"SepoliaETH",apiAddress:"https://api-sepolia.etherscan.io/api", apiKey:process.env["ETHERSCAN_API_KEY"]??"",provider:process.env["SEPOLIA_PROVIDER"]??"",explorer:"https://sepolia.etherscan.io"  }] //testnet
 ]);
 
 const ERC20_ABI = [
@@ -184,29 +184,70 @@ const Send = ({amount,address,setTx,txInfo,w}:
 	
 };
 
-const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txInfo:infoTxProp|undefined}> = ({rP,w,txInfo}) => {
+const ReceiptComponent = ({tx,receipt,chainID}:{tx:any|undefined,receipt:any|undefined,chainID:number}) =>{
+	const { isFocused } = useFocus();
+	const [color, setColor] = useState("");
+
+	useEffect(() => {
+		isFocused? setColor("blue") :setColor("black") 
+	},[isFocused])
+	
+	useInput((input, key) => {
+		if (isFocused && key.return && (tx || receipt)) {
+			open(`${networkMAP.get(chainID)?.explorer}/tx/${tx?tx.hash:receipt.hash}`); 
+		}
+	});
+
+	return(
+		<Box flexDirection='column' width={'50%'} alignItems='center' borderStyle={'round'} borderColor={color}>
+		{tx && <Box >
+				<Text>Tx Hash: {tx.hash}</Text> 
+				<Text>TX SENT</Text>
+				<Text>Awainting Confirmation...</Text>
+			</Box>}
+			{receipt && <Box> 
+				<Text>Tx Hash: {receipt.hash}</Text> 
+				<Text>Tx confirmed at block: {receipt.blockNumber}</Text>
+				<Text>Gas used: {receipt.gasUsed}</Text>
+			</Box>}
+		</Box>
+	);
+};
+
+const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txInfo:infoTxProp|undefined,chainID:number}> = ({rP,w,txInfo,chainID}) => {
 	if (!txInfo){
 		return <text>something weird happened.</text>
 	}
 	const [address, setAddress] = useState("");
+	const [uncheckAddress, setUncheckedAddress] = useState("");
 	const [amount, setAmount] = useState("");
 	const [tx, setTx] = useState<any|undefined>();
+	const [receipt, setReceipt] = useState<any|undefined>();
+	
+	useEffect(()=>{
+		if (ethers.isAddress(uncheckAddress)){setAddress(uncheckAddress)}
+	})
 
 	useEffect(()=>{
 		if (!tx){return}
-		tx.wait()
+		setAmount("");setAddress("")
+		tx.wait() 
 			.then((receipt:any) => { 
 			console.log("Transaction confirmed in block:", receipt.blockNumber);
 			console.log("Gas Used:", receipt.gasUsed.toString());
 			console.log("Transaction Success:", receipt.status === 1?"success":"failed");
+			setReceipt(receipt)
+			setTx(undefined)
 			})
 			.catch((error:any) => {
 			console.error("Error during transaction:", error);
 			});
+			
 	},[tx]) 
 
 	useInput((input, key) => {
 		if (input == "r") {
+			setReceipt(undefined)
 			rP.setState({page:"home"})
 			return
 		}
@@ -216,27 +257,48 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 		}
 	});
 
-	return(
-		//<Text>gas now: </Text> 
-		<Box flexDirection='column' width={'50%'} alignItems='center'>
-			<Input text={"Address"} value={address} setValue={setAddress}/>
-			<Input text={"Amount"} value={amount} setValue={setAmount}/>
-			<Box marginTop={1}>
-				
+	useEffect(()=>{
+		if (address && amount){
+			w.estimateGas({ to:address, value:amount })
+			.then(gasLimit => {
+				console.log(`Estimated Gas Limit: ${gasLimit.toString()}`);
+
+				w.provider?.getFeeData()
+				.then(gasData => {
+					const gasPrice = gasData.gasPrice!;
+					const gasCost = gasLimit * gasPrice;
+					const gasCostInEth = ethers.formatEther(gasCost);
+					console.log(`Total Cost in ETH: ${gasCostInEth} ETH`);
+				})
+				.catch(err => console.error("Error fetching gas price:", err));
+			})
+			.catch(err => console.error("Error estimating gas:", err));
+		}
+	},[address,amount])
+
+	return(		
+		<Box>
+			<Box flexDirection='column' width={'50%'} alignItems='center'>
+				<Input text={"Address"} value={uncheckAddress} setValue={setUncheckedAddress}/>
+				<Input text={"Amount"} value={amount} setValue={setAmount}/>
+				<Box marginTop={1} marginBottom={1}>
+					<Text>Gas price:{}</Text>
+				</Box>
+				<Send w={w} amount={amount} address={address} setTx={setTx} txInfo={txInfo}></Send>
 			</Box>
-			<Send w={w} amount={amount} address={address} setTx={setTx} txInfo={txInfo}></Send>
+			{(tx||receipt) && <ReceiptComponent tx={tx} receipt={receipt} chainID={chainID} />}
 		</Box>
 	);
 };
 
-const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,networkID:number}) => {
+const App = ({wallet, chainID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,chainID:number}) => {
 	const [page, setPage] = useState<pageState>({page:"home"});
 	const [logs, setLogs] = useState<any[]>([]);
 	const [coins, setCoins] = useState<coin[]>([]);
 
 	const checkLogs = () => {
-		const erc20TxUrl = `${networkMAP.get(networkID)?.apiAddress}?module=account&action=tokentx&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(networkID)?.apiKey}`;
-		const ethTxUrl = `${networkMAP.get(networkID)?.apiAddress}?module=account&action=txlist&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(networkID)?.apiKey}`;
+		const erc20TxUrl = `${networkMAP.get(chainID)?.apiAddress}?module=account&action=tokentx&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(chainID)?.apiKey}`;
+		const ethTxUrl = `${networkMAP.get(chainID)?.apiAddress}?module=account&action=txlist&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(chainID)?.apiKey}`;
 		
 		Promise.all([
 			fetch(ethTxUrl).then(response => response.json()),
@@ -254,7 +316,7 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 			setLogs(allTransactions)
 			//console.log(allTransactions)
 			})
-			.catch(error => console.error(`Error fetching transactions for ${networkID}:`, error));
+			.catch(error => console.error(`Error fetching transactions for ${chainID}:`, error));
 	};
 
 	useEffect(()=>{
@@ -272,13 +334,13 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 	},[logs])
 
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home rP={{setState: setPage}} w={wallet} ID={networkID} logs={logs} coins={coins} />,
-		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx}/>,
+		home: <Home rP={{setState: setPage}} w={wallet} ID={chainID} logs={logs} coins={coins} />,
+		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx} chainID={chainID}/>,
     };
 	return(
 		<Box flexDirection={"column"} width={"100%"} height={"100%"}>
 			<Box flexDirection={"column"}>
-					<Text>Network: {String(networkMAP.get(networkID)?.name)}</Text> 
+					<Text>Network: {String(networkMAP.get(chainID)?.name)}</Text> 
 					<Text>ADDRESS: {wallet.address}</Text> 
 			</Box>
 			<Box  flexDirection={"column"}>
@@ -354,7 +416,7 @@ const App = ({wallet, networkID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,netwo
 	const provider = new ethers.JsonRpcProvider(networkMAP.get(Number(answers.network))?.provider);
 	const network = await provider.getNetwork()
 	render(
-		<App wallet={wallet.connect(provider)} networkID={Number(network.chainId)}/>
+		<App wallet={wallet.connect(provider)} chainID={Number(network.chainId)}/>
 		,{exitOnCtrlC:true}
 	);
 	//console.clear() 
