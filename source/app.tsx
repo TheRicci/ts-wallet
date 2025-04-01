@@ -9,6 +9,7 @@ import * as path from 'path';
 import dotenv from "dotenv";
 import os from "os";
 import open from 'open';
+import { setTimeout } from "timers/promises";
 
 dotenv.config(); 
 
@@ -65,7 +66,7 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 				}
 			}
 		balanceCheck();
-		const interval = setInterval(balanceCheck, 10000);
+		const interval = setInterval(balanceCheck, 20000);
 		return () => clearInterval(interval); 
 	},[]);
 
@@ -98,7 +99,8 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 
 	const transactions = () =>{
 		return logs.map((item,index) => {
-			if (item.from == w.address){
+			if (item.value == "0"){return}
+			if (item.from == w.address.toLowerCase()){
 				return <Text key={index} color={"red"}>{ethers.formatUnits(String(item.value), item.tokenDecimal?Number(item.tokenDecimal):18)} {item.tokenSymbol? item.tokenSymbol: String(networkMAP.get(ID)?.symbol)} 🢥 {item.to.substring(0,9)}</Text>
 			}
 			return <Text key ={index} color={"green"}>{ethers.formatUnits(String(item.value), item.tokenDecimal?Number(item.tokenDecimal):18)} {item.tokenSymbol? item.tokenSymbol: String(networkMAP.get(ID)?.symbol)} 🢦 {item.from.substring(0,9)}</Text>
@@ -128,12 +130,18 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 	);
 };
 
-const Input = ({text,value,setValue,invalid}:{text:string,value:string,setValue:React.Dispatch<React.SetStateAction<string>>,invalid:boolean}) => {
+const Input = ({text,value,setValue,invalid,setBlock}:{text:string,value:string,setValue:React.Dispatch<React.SetStateAction<string>>,invalid:boolean,setBlock?:React.Dispatch<React.SetStateAction<boolean>>}) => {
 	const [color, setColor] = useState("");
 	const { isFocused } = useFocus();
 
 	useEffect(() => {
-		isFocused?(invalid?setColor("red"):setColor("blue")):setColor("black")
+		if (isFocused){
+			if (setBlock){setBlock(true)}
+			(invalid?setColor("red"):setColor("blue"))
+			return
+		}
+		if (setBlock){setBlock(false)}
+		setColor("black")
 	},[isFocused,invalid])
 	return(
 		<Box borderStyle={"round"} borderColor={color} marginTop={1} width={'95%'} >
@@ -143,8 +151,8 @@ const Input = ({text,value,setValue,invalid}:{text:string,value:string,setValue:
 	);
 }
 
-const Send = ({amount,address,setTx,txInfo,w}:
-	{amount:string,address:string,setTx:React.Dispatch<React.SetStateAction<any>>,txInfo:infoTxProp,w:ethers.Wallet|ethers.HDNodeWallet}) => {
+const Send = ({amount,address,setTx,txInfo,w,tx}:
+	{amount:string,address:string,setTx:React.Dispatch<React.SetStateAction<any>>,txInfo:infoTxProp,w:ethers.Wallet|ethers.HDNodeWallet,tx:any}) => {
 	const [color, setColor] = useState("");
 	const { isFocused } = useFocus();
 	const [blocked, setBlock] = useState(true)
@@ -158,10 +166,10 @@ const Send = ({amount,address,setTx,txInfo,w}:
 		if (isFocused && key.return) {
 			if (blocked){return}
 			if (txInfo.contract){
-				const contract = new ethers.Contract(address, ERC20_ABI, w) as any 
-				contract.transfer(address, ethers.parseUnits(amount, 8)) // check decimals
+				const contract = new ethers.Contract(txInfo.contract, ERC20_ABI, w) as any 
+				contract.transfer(address, ethers.parseUnits(amount, txInfo.decimal)) 
 					.then((tx:any ) => {
-					console.log("Transaction sent! Hash:", tx.hash);
+					//console.log("Transaction sent! Hash:", tx.hash);
 					setTx(tx)})
 				return
 			}
@@ -169,11 +177,16 @@ const Send = ({amount,address,setTx,txInfo,w}:
 				to:address,
 				value: ethers.parseEther(amount), // Convert ETH to Wei
 			}).then((tx:any) => {
-				console.log("Transaction sent! Hash:", tx.hash);
+				//console.log("Transaction sent! Hash:", tx.hash);
 				setTx(tx)
 			})
 		}
 	});
+
+	useEffect(() =>{
+		if(tx){setBlock(true);return}
+		setBlock(false)
+	},[tx])
 
 	return(
 		<Box marginTop={1} borderStyle={'round'} borderColor={color} width={'33%'} justifyContent='center' >
@@ -182,7 +195,6 @@ const Send = ({amount,address,setTx,txInfo,w}:
 	);
 	
 };
-
 
 const ReceiptComponent = ({tx,receipt,chainID}:{tx:any|undefined,receipt:any|undefined,chainID:number}) => {
 	const { isFocused } = useFocus();
@@ -200,12 +212,12 @@ const ReceiptComponent = ({tx,receipt,chainID}:{tx:any|undefined,receipt:any|und
 
 	return(
 		<Box flexDirection='column' width={'50%'} alignItems='center' borderStyle={'round'} borderColor={color} >
-		{tx && <Box >
+		{tx && <Box justifyContent='center' flexDirection='column' alignItems='center' width={'90%'}>
 				<Text>Tx Hash: {tx.hash}</Text> 
 				<Text>TX SENT</Text>
 				<Text>Awainting Confirmation...</Text>
 			</Box>}
-			{receipt && <Box> 
+			{receipt && <Box justifyContent='center' flexDirection='column' alignItems='center' width={'90%'}> 
 				<Text>Tx Hash: {receipt.hash}</Text> 
 				<Text>Tx confirmed at block: {receipt.blockNumber}</Text>
 				<Text>Gas used: {receipt.gasUsed}</Text>
@@ -214,7 +226,8 @@ const ReceiptComponent = ({tx,receipt,chainID}:{tx:any|undefined,receipt:any|und
 	);
 };
 
-const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txInfo:infoTxProp|undefined,chainID:number}> = ({rP,w,txInfo,chainID}) => {
+const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txInfo:infoTxProp|undefined,chainID:number,bI:boolean,setBI:React.Dispatch<React.SetStateAction<boolean>>}> = 
+	({rP,w,txInfo,chainID,bI,setBI}) => {
 	if (!txInfo){
 		return <Text>something weird happened.</Text>
 	}
@@ -226,15 +239,16 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 	const [gasPrice, setGasPrice] = useState<any>();
 	const [invalid, setInvalid] = useState<boolean>(false);
 	const [Insufficient, setInsufficient] = useState<boolean>(false);
+	const [balance, setBalance] = useState(txInfo.balance);
 
-	const contract:any|undefined = txInfo.contract?new ethers.Contract(txInfo.contract??"", ERC20_ABI, w) as any : undefined
+	//const contract:any|undefined = txInfo.contract?new ethers.Contract(txInfo.contract??"", ERC20_ABI, w) as any : undefined   //gas func
 
 	useEffect(() => {
 		if (!amount) {
 			setInsufficient(false)
 			return
 		}
-		(Number(amount) < Number(txInfo.balance))? setInsufficient(false) : setInsufficient(true);
+		(Number(amount) <= Number(balance))? setInsufficient(false) : setInsufficient(true);
 	},[amount])
 
 	useEffect(()=>{
@@ -247,22 +261,24 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 
 	useEffect(()=>{
 		if (!tx){return}
-		setAmount("");setAddress("")
-		tx.wait() 
+		setTimeout(5000).then(
+			tx.wait() 
 			.then((receipt:any) => { 
-			console.log("Transaction confirmed in block:", receipt.blockNumber);
-			console.log("Gas Used:", receipt.gasUsed.toString());
-			console.log("Transaction Success:", receipt.status === 1?"success":"failed");
-			setReceipt(receipt)
-			setTx(undefined)
-			})
-			.catch((error:any) => {
-			console.error("Error during transaction:", error);
-			});
-			
+				setAmount("");setAddress("");setUncheckedAddress("")
+				//console.log("Transaction confirmed in block:", receipt.blockNumber);
+				//console.log("Gas Used:", receipt.gasUsed.toString());
+				//console.log("Transaction Success:", receipt.status === 1?"success":"failed");
+				setReceipt(receipt)
+				setBalance(balance - Number(ethers.formatUnits(tx.value, Number(txInfo.decimal??18))))
+				setTx(undefined)
+			}).catch((error:any) => {
+					console.error("Error during transaction:", error);
+				})
+		)
 	},[tx]) 
 
 	useInput((input, key) => {
+		if (bI){return}
 		if (input == "r") {
 			setReceipt(undefined)
 			rP.setState({page:"home"})
@@ -273,6 +289,7 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 			process.exit()
 		}
 	});
+
 	/*
 	useEffect(()=>{
 		if (address && amount){
@@ -312,9 +329,10 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 	*/
 	return(		
 		<Box width={'100%'}>
+			<Text>Balance: {balance}</Text>
 			<Box flexDirection='column' width={'50%'} alignItems='center' >
 				<Box width={'100%'} flexDirection='column' alignItems='center' justifyContent='center'>
-					<Input text={"Address"} value={uncheckAddress} setValue={setUncheckedAddress} invalid={invalid}/> 
+					<Input text={"Address"} value={uncheckAddress} setValue={setUncheckedAddress} invalid={invalid} setBlock={setBI}/> 
 					{invalid && <Text color='red'>Invalid Address</Text>}
 				</Box>
 				<Box width={'100%'} flexDirection='column' alignItems='center' justifyContent='center'>
@@ -322,7 +340,7 @@ const Transfer: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,txI
 					{Insufficient && <Text color='red'>Insufficient Funds</Text>}
 				</Box>
 				<Box marginTop={1} marginBottom={1}></Box>
-				<Send w={w} amount={amount} address={address} setTx={setTx} txInfo={txInfo}></Send>
+				<Send w={w} amount={amount} address={address} setTx={setTx} txInfo={txInfo} tx={tx}></Send>
 			</Box>
 			{(tx||receipt) && <ReceiptComponent tx={tx} receipt={receipt} chainID={chainID} />}
 		</Box>
@@ -333,12 +351,13 @@ const App = ({wallet, chainID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,chainID
 	const [page, setPage] = useState<pageState>({page:"home"});
 	const [logs, setLogs] = useState<any[]>([]);
 	const [coins, setCoins] = useState<coin[]>([]);
+	const [blockInput, setBlockInput] = useState(false);
 
 	const checkLogs = () => {
 		const erc20TxUrl = `${networkMAP.get(chainID)?.apiAddress}?module=account&action=tokentx&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(chainID)?.apiKey}`;
 		const ethTxUrl = `${networkMAP.get(chainID)?.apiAddress}?module=account&action=txlist&address=${wallet.address}&startblock=0&endblock=99999999&sort=asc&apikey=${networkMAP.get(chainID)?.apiKey}`;
 		
-		Promise.all([
+		Promise.all([	//otherwise we would have to iter through all blocks
 			fetch(ethTxUrl).then(response => response.json()),
 			fetch(erc20TxUrl).then(response => response.json())
 			]).then(([ethData, erc20Data]) => {
@@ -358,25 +377,36 @@ const App = ({wallet, chainID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,chainID
 			.catch(error => console.error(`Error fetching transactions for ${chainID}:`, error));
 	};
 
+	useInput((input, key) => {
+		if (blockInput){return}
+		if (input =="q") {
+			console.clear()
+			process.exit()
+		}
+	});
+	
 	useEffect(()=>{
 		checkLogs()
 		setInterval(checkLogs,20000)
 	},[])
 
 	useEffect(()=>{
+		let coinsMap:Map<string,boolean> = new Map;
 		let coins: coin[] = [];
 		logs.map(item =>{
 			if (item.tokenSymbol && item.contractAddress && item.tokenDecimal){
-				//console.log(item)
-				coins.push({symbol:item.tokenSymbol,address:item.contractAddress,decimal:item.tokenDecimal})
+				if (!coinsMap.has(item.tokenSymbol)){
+					coinsMap.set(item.tokenSymbol, true)
+					coins.push({symbol:item.tokenSymbol,address:item.contractAddress,decimal:item.tokenDecimal})
+				}
 			}
 		})
 		setCoins(coins)
 	},[logs])
 
 	const pages: Record<PageType, JSX.Element> = {
-		home: <Home rP={{setState: setPage}} w={wallet} ID={chainID} logs={logs} coins={coins} />,
-		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx} chainID={chainID}/>,
+		home: <Home rP={{setState: setPage}} w={wallet} ID={chainID} logs={logs} coins={coins}/>,
+		transfer: <Transfer rP={{setState: setPage}} w={wallet} txInfo={page.infoTx} chainID={chainID} bI={blockInput} setBI={setBlockInput}/>,
     };
 	return(
 		<Box flexDirection={"column"} width={"100%"} height={"100%"}>
