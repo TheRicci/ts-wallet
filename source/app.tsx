@@ -14,7 +14,7 @@ import { setTimeout } from "timers/promises";
 dotenv.config(); 
 
 type PageType = "home" | "transfer" ;
-type coin = {symbol:string, address:string,decimal:number};
+type coin = {symbol:string, address:string,decimal:number,price:number|undefined};
 
 type networkINFO = {name:string, symbol:string, apiAddress:string, apiKey:string,provider:string,explorer:string};
 const networkMAP: Map<number, networkINFO> = new Map([
@@ -30,6 +30,51 @@ const ERC20_ABI = [
 	"function transfer(address to, uint256 amount) public returns (bool)"
   ]as const;
 
+interface TokenPriceResponse {
+	[contractAddress: string]: {
+		usd: number,
+		[currency: string]: number;
+	};
+}
+  
+async function getTokenPrice(
+	contractAddress: string,
+	network: string,
+	): Promise<TokenPriceResponse | undefined> {
+	try {
+		const url = `https://api.coingecko.com/api/v3/simple/token_price/${network}?contract_addresses=${contractAddress}&vs_currencies=usd`;
+  
+		const response = await fetch(url);
+		const data: TokenPriceResponse = await response.json();
+		return data;
+	} catch (error: any) {
+		console.error("Error fetching token price:", error.message);
+		return undefined;
+	}
+}
+
+interface BaseTokenPriceResponse {
+	[id: string]: {
+	  usd: number;
+	  [currency: string]: number;
+	};
+  }
+  
+  async function getBaseTokenPrice(
+	coinId: string 
+  ): Promise<BaseTokenPriceResponse | undefined> {
+	try {
+	  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`;
+  
+	  const response = await fetch(url);
+	  const data: BaseTokenPriceResponse = await response.json();
+	  return data;
+	} catch (error: any) {
+	  console.error("Error fetching base token price:", error.message);
+	  return undefined;
+	}
+  }
+
 interface infoTxProp{
 	balance: number,
 	contract?: string,
@@ -44,7 +89,7 @@ interface pageState{
 	infoTx?: infoTxProp
 }
 
-const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.Wallet|ethers.HDNodeWallet, decimal?:number}> = ({symbol,address,rP,w,decimal}) => {
+const Coin: React.FC<{symbol:string, address?:string,price:number|undefined, rP:routingProp, w:ethers.Wallet|ethers.HDNodeWallet, decimal?:number}> = ({symbol,address,price,rP,w,decimal}) => {
 	const { isFocused } = useFocus();
 	const [balance, setBalance] = useState(0.0);
 	const [color, setColor] = useState("");
@@ -85,11 +130,21 @@ const Coin: React.FC<{symbol:string, address?:string, rP:routingProp, w:ethers.W
 		<Box marginRight={1} marginLeft={1} borderStyle={"round"} borderColor={`${color}`} justifyContent={"space-between"} >
 			<Text>{symbol} </Text>
 			<Text>{balance}</Text>
+			{price && <Box>${price*balance}</Box>}
 		</Box>
 	);
 }
 
 const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:number,logs:any[],coins:coin[]}> = ({rP,w,ID,logs,coins}) => {
+	const [coinPrice, setCoinPrice] = useState<number|undefined>();
+	
+	useEffect(
+		()=>{setInterval(
+		()=>{getBaseTokenPrice(String(networkMAP.get(ID)?.symbol)).then(price=>{
+				setCoinPrice(price?.[String(networkMAP.get(ID)?.symbol)]?.usd)
+			})},1200000)
+	},[])
+
 	useInput((input, key) => {
 		if (input =="q") {
 			console.clear()
@@ -115,10 +170,10 @@ const Home: React.FC<{rP:routingProp,w:ethers.Wallet|ethers.HDNodeWallet,ID:numb
 						<Text color={"magentaBright"}>Symbol </Text>
 						<Text color={"magentaBright"}>Balance</Text>
 					</Box>
-					<Coin symbol={String(networkMAP.get(ID)?.symbol)} rP={rP} w={w}/>
+					<Coin symbol={String(networkMAP.get(ID)?.symbol)} rP={rP} w={w} price={coinPrice}/>
 				
 					{coins.map((item, index) => (
-						<Coin key={index} symbol={item.symbol} address={item.address} decimal={item.decimal} rP={rP} w={w}/>
+						<Coin key={index} symbol={item.symbol} address={item.address} decimal={item.decimal} rP={rP} w={w} price={item.price}/>
 					))}
 
 				</Box>
@@ -368,10 +423,10 @@ const App = ({wallet, chainID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,chainID
 			// Merge transactions into a single array
 			const allTransactions = [...ethTransactions, ...erc20Transactions];
 		
-			// Sort by timestamp (ascending)
-			allTransactions.sort((a, b) => Number(a.timeStamp) - Number(b.timeStamp));
+			// Sort by timestamp (descending)
+			allTransactions.sort((a, b) =>  Number(b.timeStamp) - Number(a.timeStamp));
 			
-			setLogs(allTransactions)
+			setLogs(allTransactions.slice(0,10))
 			//console.log(allTransactions)
 			})
 			.catch(error => console.error(`Error fetching transactions for ${chainID}:`, error));
@@ -391,13 +446,44 @@ const App = ({wallet, chainID}:{wallet:ethers.Wallet|ethers.HDNodeWallet,chainID
 	},[])
 
 	useEffect(()=>{
+		setInterval(()=>{
+			setCoins(prev => {
+				setTimeout(2000)
+				return prev.map(coin => {
+					if (!coin.price){return coin}
+					let c = coin
+					checkTokenPrice(coin).then(price=>{
+						coin.price = price
+						c = coin
+					})
+					return c
+				})
+			});
+		}
+		,1200000)
+	},[])	
+
+	const checkTokenPrice = async (item:coin):Promise<number|undefined> => {
+			const info = await getTokenPrice(item.address,String(networkMAP.get(chainID)?.name))
+			if (!info){return}
+			return info[item.address]?.usd
+	}
+
+	useEffect(()=>{
 		let coinsMap:Map<string,boolean> = new Map;
 		let coins: coin[] = [];
-		logs.map(item =>{
+		logs.map(async item =>{
 			if (item.tokenSymbol && item.contractAddress && item.tokenDecimal){
+				var price:number|undefined = undefined
+				if (chainID != 11155111){
+					const info = await getTokenPrice(item.contractAddress,String(networkMAP.get(chainID)?.name))
+					if (!info){return}
+						console.log(info)
+					price = info[item.contractAddress]?.usd
+				}
 				if (!coinsMap.has(item.tokenSymbol)){
 					coinsMap.set(item.tokenSymbol, true)
-					coins.push({symbol:item.tokenSymbol,address:item.contractAddress,decimal:item.tokenDecimal})
+					coins.push({symbol:item.tokenSymbol,address:item.contractAddress,decimal:item.tokenDecimal,price:price})
 				}
 			}
 		})
